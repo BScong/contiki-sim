@@ -13,7 +13,7 @@ MAKE_NET = MAKE_NET_NULLNET
 include $(CONTIKI)/Makefile.include
 
 compile-and-simulate: $(CONTIKI)/tools/cooja/dist/cooja.jar
-	java -mx1024m -jar ../../tools/cooja/dist/cooja.jar -nogui='nullnet-unicast-cooja-script.csc' -contiki='../..'
+	java -mx1024m -jar ../../tools/cooja/dist/cooja.jar -nogui='nullnet-unicast-cooja-script-123456.csc' -contiki='../..'
 	cat COOJA.testlog |grep "Sink"
 	cat COOJA.testlog |grep "collected"
 	cat COOJA.testlog |grep ":1:.*Battery"
