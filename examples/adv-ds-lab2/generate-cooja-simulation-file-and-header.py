@@ -57,7 +57,6 @@ headerCoojaMote='''<?xml version="1.0" encoding="UTF-8"?>
   <project EXPORT="discard">[APPS_DIR]/mspsim</project>
   <project EXPORT="discard">[APPS_DIR]/avrora</project>
   <project EXPORT="discard">[APPS_DIR]/serial_socket</project>
-  <project EXPORT="discard">[APPS_DIR]/collect-view</project>
   <project EXPORT="discard">[APPS_DIR]/powertracker</project>
   <simulation>
     <title>Advanced distributed systems - lab 2 - grid</title>
