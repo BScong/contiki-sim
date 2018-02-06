@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, RISE SICS.
+ * Copyright (c) 2018, Beshr Al Nahas.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -26,82 +26,406 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * This file is part of the Contiki operating system.
  *
  */
 
 /**
  * \file
- *         NullNet unicast example
+ *         Collect sensor data using NullNet
+ *         Part of the assignment skeleton for the course Advanced Distributed Systems at Chalmers University of Technology
  * \author
-*         Simon Duquennoy <simon.duquennoy@ri.se>
- *
+ *        Beshr Al Nahas <beshr@chalmers.se>
  */
 
 #include "contiki.h"
 #include "net/netstack.h"
 #include "net/nullnet/nullnet.h"
-
-#include <string.h>
-#include <stdio.h> /* For printf() */
-
-/* Log configuration */
-#include "sys/log.h"
-#define LOG_MODULE "App"
-#define LOG_LEVEL LOG_LEVEL_INFO
-
-/* Configuration */
-#define SEND_INTERVAL (8 * CLOCK_SECOND)
-static linkaddr_t dest_addr =         {{ 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }};
-
+#include "sys/energest.h"
+#include "random.h"
+#include "node-id.h"
 #if MAC_CONF_WITH_TSCH
 #include "net/mac/tsch/tsch.h"
-static linkaddr_t coordinator_addr =  {{ 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }};
 #endif /* MAC_CONF_WITH_TSCH */
+#include <string.h>
+#include <stdio.h> /* For printf() */
+#include "motes-xy-lookup-table.h"
+/*---------------------------------------------------------------------------*/
+/* Log configuration */
+#include "sys/log.h"
+#define LOG_MODULE "APP"
+#define LOG_LEVEL LOG_LEVEL_INFO /* You can use LOG_LEVEL_DBG */
+#define LOG_CONF_LEVEL_APP  LOG_LEVEL_INFO /* You can use LOG_LEVEL_DBG */
+/*---------------------------------------------------------------------------*/
+/* Types */
+/* define the short address type as 16bits */
+typedef uint16_t short_address_t;
+
+/* The structure for the messages
+ * Here you can add additional fields that you might need.
+ */
+typedef struct __attribute__((packed)) rout_msg {
+  uint32_t seq;         /* packet sequence number */
+  short_address_t from; /* Original sender. 
+                           We will not include the address of the receiver as we emply that all messages are directed to the sink. */
+  uint16_t content;
+  uint8_t type;         /* TYPE_ANNOUNCEMENT or TYPE_CONTENT*/
+} rout_msg_t;
+
+/* Message type identifier */
+enum message_type_enum { TYPE_ANNOUNCEMENT = 11, TYPE_CONTENT };
+
+/* define a boolean type for enhancing code readability */
+typedef uint8_t bool;
+#define TRUE 1
+#define FALSE 0
+/*---------------------------------------------------------------------------*/
+/* Topology */
+static const uint16_t motes_xy_lookup_table[][2] = MOTES_XY_LOOKUP_TABLE;
+
+/* How long can the radio reach. You can change this in the simualtion settings, but then you need to change it here. */
+#define RADIO_RANGE 50
+
+/* The starting battery level */
+/* Assume a battery capacity of 1mAh = 1000 microAh = 1000*3600*1000 mA/microseconds */
+#define BATTERY_CAPACITY_MICRO_AH (100)
+#define BATTERYSTART ((uint64_t)BATTERY_CAPACITY_MICRO_AH*3600*1000)
+
+/* Radio energy usage *
+ * Assume: 10mA for tx/rx/idle , 0 for off */
+#define RADIO_TX_CURRENT 10u
+#define RADIO_RX_CURRENT 10u
+/*---------------------------------------------------------------------------*/
+/* Configuration */
+/* ID of the node that acts as the sink */
+#define SINKNODE 1
+#define SEND_INTERVAL (1 * CLOCK_SECOND)
+
+/* Number of different rounds in protocol and the rounds themselves */
+#define ROUNDS 2
+/* Round type identifier */
+enum round_type_enum { ROUND_ANNOUNCEMENT = 0, ROUND_CONTENT };
+
+/* Whether the battery model should be used */
+#define USEBATTERY 1
+
+/* Whether basic routing should be used */
+#define BASICROUTER 1 
+/*---------------------------------------------------------------------------*/
+/* default router address is the broadcast address: all zeros == linkaddr_null */
+static linkaddr_t router_addr = {{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }};
+static const linkaddr_t sink_addr =   {{ SINKNODE, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }};
+/*---------------------------------------------------------------------------*/
+static uint32_t roundcounter = 0; /* Counting communication rounds so far */
+static uint64_t battery = BATTERYSTART; /* Battery capacity estimate */
+static struct etimer periodic_timer; /* Wakeup timer */
+/*---------------------------------------------------------------------------*/
+/* Helper functions */
+/* get the message type as a string */
+#define GET_MSG_TYPE_STR(T) ( (T) == TYPE_ANNOUNCEMENT ? "ANNOUNCEMENT" : ((T) == TYPE_CONTENT ? "CONTENT" : "UNKNOWN") )
+
+/* Returns a random number between 0 and n-1 (both inclusive) */
+uint16_t random(uint16_t n) {
+  return (random_rand()) % n;
+}
+
+/* Comuptes the square of the distance. We do not use the sqaure root function to have light-weight computations. */
+int16_t distance_x_y(uint16_t ax, uint16_t ay, uint16_t bx, uint16_t by){
+  return (int16_t)((bx - ax) * (bx - ax) + (by - ay) * (by - ay));
+}
+
+int16_t distance_between(short_address_t aid, short_address_t bid){
+  /* Use a lookup table */
+  uint16_t ax = motes_xy_lookup_table[aid][0];
+  uint16_t ay = motes_xy_lookup_table[aid][1];
+  uint16_t bx = motes_xy_lookup_table[bid][0];
+  uint16_t by = motes_xy_lookup_table[bid][1];
+  return distance_x_y(ax, ay, bx, by);
+}
+
+int16_t distance_to_sink(short_address_t id){
+  return distance_between(SINKNODE, id);
+}
+
+bool can_reach_sink(short_address_t node){
+  return distance_to_sink(node) < RADIO_RANGE*RADIO_RANGE;
+}
 
 /*---------------------------------------------------------------------------*/
-PROCESS(nullnet_example_process, "NullNet unicast example");
-AUTOSTART_PROCESSES(&nullnet_example_process);
+/* Routing helping functions */
+
+bool is_sink() {
+  return SINKNODE == node_id;
+  /* Instead, we could test: 
+   * sink_addr.u16[0] == linkaddr_node_addr.u16[0]; 
+   */
+  /* No need to compare the whole address as we are only changing the first two bytes of the address anyway
+   *  return linkaddr_cmp(&sink_addr, &linkaddr_node_addr);
+   *
+   */
+}
+
+bool has_router(){
+  return (router_addr.u16[0] != 0);
+  /* No need to compare the whole address as we are only changing the first two bytes of the address anyway
+   *  return !linkaddr_cmp(&router_addr, &linkaddr_null);
+   *
+   */
+}
+
+void set_router(short_address_t new_router_id){
+  router_addr.u16[0] = new_router_id;
+  LOG_INFO("Router: updated to %u\n", new_router_id);
+}
+
+void sink_collect_data(const rout_msg_t * msg){
+  static uint32_t collected_so_far = 0;
+  collected_so_far += msg->content;
+  LOG_INFO("Sink: received %u from %u\n", msg->content, msg->from);
+  LOG_INFO("Sink: collected so far %u\n", collected_so_far);
+}
+
+void update_router(const rout_msg_t * msg){
+  /* Here is the basic routing algorithm. You shall design a better one below. */
+  if(BASICROUTER) {
+    /* I do not have a router ==> use the first neighbor that is closer to the sink as router */
+    bool good_candidate = distance_to_sink(msg->from) < distance_to_sink(node_id);
+    if( !has_router() && good_candidate ){
+      set_router(msg->from);
+    }
+  } else {
+  /* Here is where you take a better decision. 
+    * Set BASICROUTER to 0 and your algorithm runs instead.
+    * You might have to change in other places as well.
+    * It's nice if you can switch back and forth by setting
+    * BASICROUTER, but it's not a requirement.
+    */
+
+  }
+}
+
+bool send_message(const rout_msg_t * msg, const linkaddr_t *nexthop_addr){
+  /* *
+  * Send message:
+  * 1. point to the message buffer
+  * 2. set the size of the message (cannot exceed ~100 bytes)
+  * 3. call the send function and pass the address of the nexthop (router)
+  * */
+  if(nexthop_addr != NULL){
+    LOG_INFO("Sending %s msg %u-%u via ", GET_MSG_TYPE_STR(msg->type), msg->from, msg->seq);
+    LOG_INFO_LLADDR(nexthop_addr);
+    LOG_INFO_("\n");
+    nullnet_buf = (uint8_t *)msg;
+    nullnet_len = sizeof(rout_msg_t);
+    NETSTACK_NETWORK.output(nexthop_addr);
+    return TRUE;
+  } else {
+    LOG_INFO("WARNING: Skipping msg %u-%u as I do not have a router\n", msg->from, msg->seq);
+    return FALSE;
+  }
+}
+/* Decide nexthop address, then send message. */
+bool route_message(const rout_msg_t * msg){
+  const linkaddr_t *nexthop_addr = NULL; /* pointer to constant data */
+  /* *
+   * send ANNOUNCEMENT as broadcast
+   * and CONTENT as unicast via the router
+   * */
+  if( msg->type == TYPE_ANNOUNCEMENT ){
+    nexthop_addr = (linkaddr_t *)&linkaddr_null; /* broadcast address -- all zeros */
+  } else if( msg->type == TYPE_CONTENT ){
+    if( !has_router() ){
+      if( can_reach_sink(node_id) ){ /* I can reach the sink directly */
+        nexthop_addr = &sink_addr;
+        LOG_INFO_("WARNING: No router is set. Trying to reach to sink directly\n");
+      }
+    } else {
+      nexthop_addr = &router_addr;
+    }
+  }
+  return send_message(msg, nexthop_addr);
+}
 
 /*---------------------------------------------------------------------------*/
+/* Communication functions */
+
+bool send_content(){
+  static rout_msg_t message = {0};
+  static uint32_t sequence = 0;
+  message.from = node_id; /* The ID of the node */
+  message.type = TYPE_CONTENT;
+  message.content = 1;
+  message.seq = sequence++;
+  return route_message(&message);
+}
+
+bool send_announcement(){
+  static rout_msg_t message = {0};
+  static uint32_t sequence = 0;
+  message.from = node_id; /* The ID of the node */
+  message.type = TYPE_ANNOUNCEMENT;
+  message.content = 0; /* could be used for the routing metric */
+  message.seq = sequence++;
+  return route_message(&message);
+}
+
+bool communication_round(){
+  if( has_router() || is_sink() ){
+    roundcounter++;
+    if( roundcounter % ROUNDS == ROUND_ANNOUNCEMENT ){
+      return send_announcement();
+    } else if( roundcounter % ROUNDS == ROUND_CONTENT ){
+      if( !is_sink() ) {
+        /* all nodes send data to reach the sink */
+        return send_content();
+      }
+    }
+  }
+  return FALSE;
+}
+
+void receive_content(const rout_msg_t *incoming_message) {
+  if( is_sink() ){
+    sink_collect_data( incoming_message );
+  } else{
+    route_message( incoming_message );
+  }
+}
+
+void receive_announcement(const rout_msg_t *incoming_message) {
+  if( !is_sink() ){
+    update_router( incoming_message );
+  }
+}
+
+/* input_callback gets invoked when a message is received successfuly. 
+  data: pointer to payload,
+  len: length of the payload in bytes,
+  src: immediate sender address,
+  dest: immediate receiver address  */
 void input_callback(const void *data, uint16_t len,
   const linkaddr_t *src, const linkaddr_t *dest)
 {
-  LOG_INFO("Received %u from ", *(unsigned *)data);
+  const rout_msg_t *incoming_message = (rout_msg_t *) data;
+
+  LOG_DBG("RX %u %u %u %u\n", incoming_message->seq, incoming_message->from, incoming_message->content, incoming_message->type );
+  LOG_INFO("Received %s msg from %u-%u via ", GET_MSG_TYPE_STR(incoming_message->type), incoming_message->from, incoming_message->seq);
   LOG_INFO_LLADDR(src);
   LOG_INFO_("\n");
+
+  if( incoming_message->type == TYPE_ANNOUNCEMENT ){
+    receive_announcement((rout_msg_t *)incoming_message);
+  } else if( incoming_message->type == TYPE_CONTENT ){
+    receive_content((rout_msg_t *)incoming_message);
+  } else {
+    LOG_INFO_("UNKNOWN message received\n");
+  }
 }
 /*---------------------------------------------------------------------------*/
-PROCESS_THREAD(nullnet_example_process, ev, data)
+/* STARTUP */
+void start_node() {
+  battery = BATTERYSTART;
+#if MAC_CONF_WITH_TSCH
+  tsch_set_coordinator(linkaddr_cmp(&sink_addr, &linkaddr_node_addr));
+#endif /* MAC_CONF_WITH_TSCH */
+  /* Initialize NullNet input callback */
+  nullnet_set_input_callback(input_callback);
+  /* Start the timer */
+  etimer_set(&periodic_timer, SEND_INTERVAL);
+}
+
+void stop_node() {
+  battery = 0;
+  etimer_stop(&periodic_timer);
+  NETSTACK_MAC.off();
+}
+/*---------------------------------------------------------------------------*/
+/* BATTERY */
+/* True if battery ran out */
+bool battery_isempty() {
+  return (USEBATTERY && battery == 0);
+}
+
+/* Stop node when battery has run out */
+bool battery_check() {
+  if (battery_isempty()) {
+    LOG_INFO_("Battery: Node ran out of battery\n");
+    if(node_id == SINKNODE){
+      LOG_WARN_("Sink: Battery: DEAD\n");
+    }
+    stop_node();
+  }
+  return battery_isempty();
+}
+
+/* Uses the stated level of battery.
+ * Returns whether it was enough or not.
+ * Shuts the node down if battery is empty
+ */
+bool battery_use(uint64_t use) {
+  bool dostuff;
+  dostuff = (use < battery);
+  if(dostuff) {
+    LOG_INFO("BatteryUse: Consumed %llu of battery %llu\n", use, battery);
+  } else {
+    battery = 0;
+    battery_check();
+  }
+  return !USEBATTERY || dostuff;
+}
+
+static unsigned long to_milliseconds(uint64_t time){
+  return (unsigned long)(time / (ENERGEST_SECOND/1000));
+}
+
+/* Prints used energy so far, updates estimate and checks battery: if empty then it stops the node */
+static bool refresh_and_show_energy_estimate(){
+  uint64_t usage;
+
+  /* Update all energest times. */
+  energest_flush();
+
+  LOG_DBG("Energest: Radio LISTEN %4lu us, TRANSMIT %4lu us\n",
+      to_milliseconds(energest_type_time(ENERGEST_TYPE_LISTEN)),
+      to_milliseconds(energest_type_time(ENERGEST_TYPE_TRANSMIT)));
+
+  usage = energest_type_time(ENERGEST_TYPE_LISTEN) * RADIO_RX_CURRENT + energest_type_time(ENERGEST_TYPE_TRANSMIT) * RADIO_TX_CURRENT;
+
+  return battery_use(usage);
+}
+/*---------------------------------------------------------------------------*/
+PROCESS(collect_example_process, "Collect example");
+AUTOSTART_PROCESSES(&collect_example_process);
+/*---------------------------------------------------------------------------*/
+/* Main process function */
+PROCESS_THREAD(collect_example_process, ev, data)
 {
-  static struct etimer periodic_timer;
-  static unsigned count = 0;
+  /* *
+   * use static or global variables ONLY inside the process;
+   * otherwise, local variables values are lost after PROCESS_WAIT_* statements
+   * (think of the PROCESS_WAIT_* statement as a return statement that exits the function, but has the ability of resuming execution from the exit point)
+   * */
+
+  static bool continue_work = 0;
 
   PROCESS_BEGIN();
 
-#if MAC_CONF_WITH_TSCH
-  tsch_set_coordinator(linkaddr_cmp(&coordinator_addr, &linkaddr_node_addr));
-#endif /* MAC_CONF_WITH_TSCH */
+  LOG_INFO_("Starting the application process.\n");
 
-  /* Initialize NullNet */
-  nullnet_buf = (uint8_t *)&count;
-  nullnet_len = sizeof(count);
-  nullnet_set_input_callback(input_callback);
+  start_node();
 
-  if(!linkaddr_cmp(&dest_addr, &linkaddr_node_addr)) {
-    etimer_set(&periodic_timer, SEND_INTERVAL);
-    while(1) {
-      PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&periodic_timer));
-      LOG_INFO("Sending %u to ", count);
-      LOG_INFO_LLADDR(&dest_addr);
-      LOG_INFO_("\n");
-
-      NETSTACK_NETWORK.output(&dest_addr);
-      count++;
+  /* keep running while we have energy */
+  while( !battery_check() ) {
+    PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&periodic_timer));
+    communication_round();
+    continue_work = refresh_and_show_energy_estimate();
+    if(continue_work){
       etimer_reset(&periodic_timer);
+    } else {
+      break;
     }
   }
 
+  LOG_INFO_("END!\n");
   PROCESS_END();
 }
 /*---------------------------------------------------------------------------*/
