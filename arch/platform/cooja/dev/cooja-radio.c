@@ -32,6 +32,7 @@
 #include <string.h>
 
 #include "contiki.h"
+#include "sys/energest.h"
 
 #include "sys/cooja_mt.h"
 #include "lib/simEnvChange.h"
@@ -129,6 +130,7 @@ radio_LQI(void)
 static int
 radio_on(void)
 {
+  ENERGEST_ON(ENERGEST_TYPE_LISTEN);
   simRadioHWOn = 1;
   return 1;
 }
@@ -136,6 +138,7 @@ radio_on(void)
 static int
 radio_off(void)
 {
+  ENERGEST_OFF(ENERGEST_TYPE_LISTEN);
   simRadioHWOn = 0;
   return 1;
 }
@@ -213,6 +216,7 @@ radio_send(const void *payload, unsigned short payload_len)
     /* Turn on radio temporarily */
     simRadioHWOn = 1;
   }
+
   if(payload_len > COOJA_RADIO_BUFSIZE) {
     return RADIO_TX_ERR;
   }
@@ -230,16 +234,25 @@ radio_send(const void *payload, unsigned short payload_len)
   }
 #endif /* COOJA_TRANSMIT_ON_CCA */
 
+  if(radiostate) {
+     ENERGEST_OFF(ENERGEST_TYPE_LISTEN);
+   }
+
   /* Copy packet data to temporary storage */
   memcpy(simOutDataBuffer, payload, payload_len);
   simOutSize = payload_len;
 
   /* Transmit */
+  ENERGEST_ON(ENERGEST_TYPE_TRANSMIT);
   while(simOutSize > 0) {
     cooja_mt_yield();
   }
+  ENERGEST_OFF(ENERGEST_TYPE_TRANSMIT);
 
   simRadioHWOn = radiostate;
+  if(radiostate) {
+     ENERGEST_ON(ENERGEST_TYPE_LISTEN);
+   }
   return RADIO_TX_OK;
 }
 /*---------------------------------------------------------------------------*/
