@@ -1,7 +1,7 @@
 /*******************************************************************************
  * BSD 3-Clause License
  *
- * Copyright (c) 2017 Beshr Al Nahas.
+ * Copyright (c) 2018 Beshr Al Nahas.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without

@@ -354,6 +354,7 @@ bool battery_check() {
   if (battery_isempty()) {
     LOG_INFO_("Battery: Node ran out of battery\n");
     if(node_id == SINKNODE){
+      /* Do not change this message as it is used by Cooja to halt the simulation early */
       LOG_WARN_("Sink: Battery: DEAD\n");
     }
     stop_node();

@@ -186,7 +186,7 @@ def generateCoojaMoteList(type='cooja'):
   global templateCoojaMote, templateSkyMote, headerCoojaMote, footerCoojaMote
 
   headerFileName='motes-xy-lookup-table.h'
-  coojaFileName='nullnet-unicast-cooja-script.csc'
+  coojaFileName='nullnet-unicast-cooja-script-test.csc'
   coojaRandomSeed = 123456
   coojaScriptTimeoutMinutes=10
   numberOfMotes = 50
