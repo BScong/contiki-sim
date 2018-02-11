@@ -9,3 +9,13 @@ Important links:
 * Gitter: https://gitter.im/contiki-ng
 * Twitter: https://twitter.com/contiki_ng
 * Web site: http://contiki-ng.org
+
+Git commands to execute in the terminal:
+
+git clone https://beshr@bitbucket.org/beshr/contiki-ng.git contiki-ng
+
+git checkout develop
+
+The relevant files are located under:
+
+contiki-ng/examples/adv-ds-lab2
