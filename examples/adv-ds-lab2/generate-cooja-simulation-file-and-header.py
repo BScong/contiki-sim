@@ -204,7 +204,7 @@ def generateCoojaMoteList(type='cooja'):
   ymod=rows*yspace
   randomize=0
 
-  nlist = range(0, numberOfMotes, 1)
+  nlist = range(1, numberOfMotes+1, 1)
   positions = []
   coojaFileContents = coojaFileContents + headerCoojaMote % (coojaRandomSeed)
 

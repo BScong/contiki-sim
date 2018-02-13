@@ -135,10 +135,10 @@ int16_t distance_x_y(uint16_t ax, uint16_t ay, uint16_t bx, uint16_t by){
 
 int16_t distance_between(short_address_t aid, short_address_t bid){
   /* Use a lookup table */
-  uint16_t ax = motes_xy_lookup_table[aid][0];
-  uint16_t ay = motes_xy_lookup_table[aid][1];
-  uint16_t bx = motes_xy_lookup_table[bid][0];
-  uint16_t by = motes_xy_lookup_table[bid][1];
+  uint16_t ax = motes_xy_lookup_table[aid-1][0];
+  uint16_t ay = motes_xy_lookup_table[aid-1][1];
+  uint16_t bx = motes_xy_lookup_table[bid-1][0];
+  uint16_t by = motes_xy_lookup_table[bid-1][1];
   return distance_x_y(ax, ay, bx, by);
 }
 
