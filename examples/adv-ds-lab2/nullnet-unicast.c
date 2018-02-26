@@ -129,11 +129,11 @@ uint16_t random(uint16_t n) {
 }
 
 /* Comuptes the square of the distance. We do not use the sqaure root function to have light-weight computations. */
-int16_t distance_x_y(uint16_t ax, uint16_t ay, uint16_t bx, uint16_t by){
-  return (int16_t)((bx - ax) * (bx - ax) + (by - ay) * (by - ay));
+int32_t distance_x_y(uint16_t ax, uint16_t ay, uint16_t bx, uint16_t by){
+  return (int32_t)((bx - ax) * (bx - ax) + (by - ay) * (by - ay));
 }
 
-int16_t distance_between(short_address_t aid, short_address_t bid){
+int32_t distance_between(short_address_t aid, short_address_t bid){
   /* Use a lookup table */
   uint16_t ax = motes_xy_lookup_table[aid-1][0];
   uint16_t ay = motes_xy_lookup_table[aid-1][1];
@@ -142,7 +142,7 @@ int16_t distance_between(short_address_t aid, short_address_t bid){
   return distance_x_y(ax, ay, bx, by);
 }
 
-int16_t distance_to_sink(short_address_t id){
+int32_t distance_to_sink(short_address_t id){
   return distance_between(SINKNODE, id);
 }
 
