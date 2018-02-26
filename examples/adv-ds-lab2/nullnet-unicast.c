@@ -65,9 +65,11 @@ typedef uint16_t short_address_t;
  */
 typedef struct __attribute__((packed)) rout_msg {
   uint32_t seq;         /* packet sequence number */
-  short_address_t from; /* Original sender. 
+  short_address_t from; /* Original sender.
                            We will not include the address of the receiver as we emply that all messages are directed to the sink. */
   uint16_t content;
+  uint16_t hops;
+  uint64_t bat;
   uint8_t type;         /* TYPE_ANNOUNCEMENT or TYPE_CONTENT*/
 } rout_msg_t;
 
@@ -109,13 +111,15 @@ enum round_type_enum { ROUND_ANNOUNCEMENT = 0, ROUND_CONTENT };
 #define USEBATTERY 1
 
 /* Whether basic routing should be used */
-#define BASICROUTER 1 
+#define BASICROUTER 1
 /*---------------------------------------------------------------------------*/
 /* default router address is the broadcast address: all zeros == linkaddr_null */
 static linkaddr_t router_addr = {{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }};
 static const linkaddr_t sink_addr =   {{ SINKNODE, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }};
 /*---------------------------------------------------------------------------*/
 static uint32_t roundcounter = 0; /* Counting communication rounds so far */
+static uint32_t local_hops = 0;
+static uint64_t router_battery = 0;
 static uint64_t battery = BATTERYSTART; /* Battery capacity estimate */
 static struct etimer periodic_timer; /* Wakeup timer */
 /*---------------------------------------------------------------------------*/
@@ -155,8 +159,8 @@ bool can_reach_sink(short_address_t node){
 
 bool is_sink() {
   return SINKNODE == node_id;
-  /* Instead, we could test: 
-   * sink_addr.u16[0] == linkaddr_node_addr.u16[0]; 
+  /* Instead, we could test:
+   * sink_addr.u16[0] == linkaddr_node_addr.u16[0];
    */
   /* No need to compare the whole address as we are only changing the first two bytes of the address anyway
    *  return linkaddr_cmp(&sink_addr, &linkaddr_node_addr);
@@ -193,12 +197,24 @@ void update_router(const rout_msg_t * msg){
       set_router(msg->from);
     }
   } else {
-  /* Here is where you take a better decision. 
+  /* Here is where you take a better decision.
     * Set BASICROUTER to 0 and your algorithm runs instead.
     * You might have to change in other places as well.
     * It's nice if you can switch back and forth by setting
     * BASICROUTER, but it's not a requirement.
     */
+
+
+    if(router_addr.u16[0] == msg->from){
+        // current router is same, we just update battery
+        router_battery = msg->bat;
+    } else {
+        if(local_hops==0 || msg->hops+1<local_hops || (msg->hops+1==local_hops && msg->bat>router_battery)){
+            local_hops = msg->hops+1;
+            router_battery = msg->bat;
+            set_router(msg->from);
+        }
+    }
 
   }
 }
@@ -263,6 +279,8 @@ bool send_announcement(){
   static uint32_t sequence = 0;
   message.from = node_id; /* The ID of the node */
   message.type = TYPE_ANNOUNCEMENT;
+  message.hops = local_hops;
+  message.bat = battery;
   message.content = 0; /* could be used for the routing metric */
   message.seq = sequence++;
   return route_message(&message);
@@ -297,7 +315,7 @@ void receive_announcement(const rout_msg_t *incoming_message) {
   }
 }
 
-/* input_callback gets invoked when a message is received successfuly. 
+/* input_callback gets invoked when a message is received successfuly.
   data: pointer to payload,
   len: length of the payload in bytes,
   src: immediate sender address,
@@ -331,6 +349,9 @@ void start_node() {
 #if MAC_CONF_WITH_TSCH
   tsch_set_coordinator(linkaddr_cmp(&sink_addr, &linkaddr_node_addr));
 #endif /* MAC_CONF_WITH_TSCH */
+  if(can_reach_sink(node_id)){
+      local_hops=1;
+  }
   /* Initialize NullNet input callback */
   nullnet_set_input_callback(input_callback);
   /* Start the timer */
