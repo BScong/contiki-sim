@@ -111,7 +111,7 @@ enum round_type_enum { ROUND_ANNOUNCEMENT = 0, ROUND_CONTENT };
 #define USEBATTERY 1
 
 /* Whether basic routing should be used */
-#define BASICROUTER 1
+#define BASICROUTER 0
 /*---------------------------------------------------------------------------*/
 /* default router address is the broadcast address: all zeros == linkaddr_null */
 static linkaddr_t router_addr = {{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }};
