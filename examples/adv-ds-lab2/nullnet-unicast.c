@@ -121,6 +121,7 @@ static uint32_t roundcounter = 0; /* Counting communication rounds so far */
 static uint32_t local_hops = 0;
 static uint64_t router_battery = 0;
 static uint64_t battery = BATTERYSTART; /* Battery capacity estimate */
+static uint64_t current_battery = BATTERYSTART;
 static struct etimer periodic_timer; /* Wakeup timer */
 /*---------------------------------------------------------------------------*/
 /* Helper functions */
@@ -190,7 +191,7 @@ void sink_collect_data(const rout_msg_t * msg){
 
 void update_router(const rout_msg_t * msg){
   /* Here is the basic routing algorithm. You shall design a better one below. */
-  if(BASICROUTER) {
+  if(BASICROUTER || !has_router()) {
     /* I do not have a router ==> use the first neighbor that is closer to the sink as router */
     bool good_candidate = distance_to_sink(msg->from) < distance_to_sink(node_id);
     if( !has_router() && good_candidate ){
@@ -280,9 +281,10 @@ bool send_announcement(){
   message.from = node_id; /* The ID of the node */
   message.type = TYPE_ANNOUNCEMENT;
   message.hops = local_hops;
-  message.bat = battery;
+  message.bat = current_battery;
   message.content = 0; /* could be used for the routing metric */
   message.seq = sequence++;
+  LOG_INFO("Hops : %u, battery : %u\n",local_hops,current_battery);
   return route_message(&message);
 }
 
@@ -346,11 +348,15 @@ void input_callback(const void *data, uint16_t len,
 /* STARTUP */
 void start_node() {
   battery = BATTERYSTART;
+  current_battery = battery;
 #if MAC_CONF_WITH_TSCH
   tsch_set_coordinator(linkaddr_cmp(&sink_addr, &linkaddr_node_addr));
 #endif /* MAC_CONF_WITH_TSCH */
   if(can_reach_sink(node_id)){
       local_hops=1;
+  }
+  if (is_sink()){
+      local_hops=0;
   }
   /* Initialize NullNet input callback */
   nullnet_set_input_callback(input_callback);
@@ -392,6 +398,8 @@ bool battery_use(uint64_t use) {
   dostuff = (use < battery);
   if(dostuff) {
     LOG_INFO("BatteryUse: Consumed %llu of battery %llu\n", use, battery);
+    current_battery = battery-use;
+    LOG_INFO("Current battery level : %u\n", current_battery);
   } else {
     battery = 0;
     battery_check();
