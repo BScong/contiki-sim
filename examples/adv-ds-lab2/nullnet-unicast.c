@@ -112,6 +112,8 @@ enum round_type_enum { ROUND_ANNOUNCEMENT = 0, ROUND_CONTENT };
 
 /* Whether basic routing should be used */
 #define BASICROUTER 0
+// BASICROUTER on : around 1300 msgs (1321)
+// BASICROUTER off : around 1400 msgs (1433)
 /*---------------------------------------------------------------------------*/
 /* default router address is the broadcast address: all zeros == linkaddr_null */
 static linkaddr_t router_addr = {{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }};
@@ -383,6 +385,9 @@ bool battery_check() {
     if(node_id == SINKNODE){
       /* Do not change this message as it is used by Cooja to halt the simulation early */
       LOG_WARN_("Sink: Battery: DEAD\n");
+    }
+    if(BASICROUTER){
+        LOG_INFO("BASIC ROUTER\n");
     }
     stop_node();
   }
