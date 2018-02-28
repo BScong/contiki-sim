@@ -56,6 +56,8 @@
 #define LOG_LEVEL LOG_LEVEL_INFO /* You can use LOG_LEVEL_DBG */
 #define LOG_CONF_LEVEL_APP  LOG_LEVEL_INFO /* You can use LOG_LEVEL_DBG */
 /*---------------------------------------------------------------------------*/
+
+
 /* Types */
 /* define the short address type as 16bits */
 typedef uint16_t short_address_t;
@@ -122,6 +124,7 @@ static const linkaddr_t sink_addr =   {{ SINKNODE, 0x00, 0x00, 0x00, 0x00, 0x00,
 static uint32_t roundcounter = 0; /* Counting communication rounds so far */
 static uint32_t local_hops = 0;
 static uint64_t router_battery = 0;
+static double   router_metric  = 0;
 static uint64_t battery = BATTERYSTART; /* Battery capacity estimate */
 static uint64_t current_battery = BATTERYSTART;
 static struct etimer periodic_timer; /* Wakeup timer */
@@ -207,14 +210,30 @@ void update_router(const rout_msg_t * msg){
     * BASICROUTER, but it's not a requirement.
     */
 
+    double msg_metric = 1.0;
+    int8_t i;
+    if(msg->hops > 0){
+       double bt = ((double)msg->bat)/(BATTERYSTART*msg->hops);
+       for(i=0;i<msg->hops;i++){
+         msg_metric *= bt;
+       }
+      // msg_metric = ((double)msg->bat)/(BATTERYSTART*msg->hops);
+    }else{
+       msg_metric = 1.0;
+    }
+
 
     if(router_addr.u16[0] == msg->from){
         // current router is same, we just update battery
         router_battery = msg->bat;
+        router_metric = msg_metric;
+
     } else {
-        if(local_hops==0 || msg->hops+1<local_hops || (msg->hops+1==local_hops && msg->bat>router_battery)){
+  	double rng = ((double) random(100))/100;
+        if(!has_router() || ((distance_to_sink(msg->from) < distance_to_sink(node_id)) && rng <= msg_metric)){
             local_hops = msg->hops+1;
             router_battery = msg->bat;
+            router_metric = msg_metric;
             set_router(msg->from);
         }
     }
@@ -283,7 +302,7 @@ bool send_announcement(){
   message.from = node_id; /* The ID of the node */
   message.type = TYPE_ANNOUNCEMENT;
   message.hops = local_hops;
-  message.bat = current_battery;
+  message.bat = current_battery + router_battery;
   message.content = 0; /* could be used for the routing metric */
   message.seq = sequence++;
   LOG_INFO("Hops : %u, battery : %u\n",local_hops,current_battery);
@@ -359,7 +378,8 @@ void start_node() {
   }
   if (is_sink()){
       local_hops=0;
-  }
+  } 
+ 
   /* Initialize NullNet input callback */
   nullnet_set_input_callback(input_callback);
   /* Start the timer */
