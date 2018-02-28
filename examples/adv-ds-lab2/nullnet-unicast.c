@@ -113,9 +113,11 @@ enum round_type_enum { ROUND_ANNOUNCEMENT = 0, ROUND_CONTENT };
 #define USEBATTERY 1
 
 /* Whether basic routing should be used */
-#define BASICROUTER 0
-// BASICROUTER on : around 1300 msgs (1321)
-// BASICROUTER off : around 1400 msgs (1433)
+#define ROUTERTYPE 2
+// ROUTERTYPE 0 : BASIC, 1: MIN HOPS, 2: MAX HOPS
+// BASIC : around 1300 msgs (1321)
+// MIN HOPS : around 1400 msgs (1433)
+// MAX HOPS : around 500 msgs (524)
 /*---------------------------------------------------------------------------*/
 /* default router address is the broadcast address: all zeros == linkaddr_null */
 static linkaddr_t router_addr = {{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }};
@@ -125,6 +127,8 @@ static uint32_t roundcounter = 0; /* Counting communication rounds so far */
 static uint32_t local_hops = 0;
 static uint64_t router_battery = 0;
 static double   router_metric  = 0;
+static int32_t local_distance = 0;
+static int32_t router_distance = 0;
 static uint64_t battery = BATTERYSTART; /* Battery capacity estimate */
 static uint64_t current_battery = BATTERYSTART;
 static struct etimer periodic_timer; /* Wakeup timer */
@@ -196,13 +200,14 @@ void sink_collect_data(const rout_msg_t * msg){
 
 void update_router(const rout_msg_t * msg){
   /* Here is the basic routing algorithm. You shall design a better one below. */
-  if(BASICROUTER || !has_router()) {
+ if(ROUTERTYPE == 0 || !has_router()) {
     /* I do not have a router ==> use the first neighbor that is closer to the sink as router */
     bool good_candidate = distance_to_sink(msg->from) < distance_to_sink(node_id);
     if( !has_router() && good_candidate ){
+      router_distance = distance_to_sink(msg->from);
       set_router(msg->from);
     }
-  } else {
+  } else if(ROUTERTYPE == 3) {
   /* Here is where you take a better decision.
     * Set BASICROUTER to 0 and your algorithm runs instead.
     * You might have to change in other places as well.
@@ -210,7 +215,7 @@ void update_router(const rout_msg_t * msg){
     * BASICROUTER, but it's not a requirement.
     */
 
-    double msg_metric = 1.0;
+   double msg_metric = 1.0;
     int8_t i;
     if(msg->hops > 0){
        double bt = ((double)msg->bat)/(BATTERYSTART*msg->hops);
@@ -229,15 +234,33 @@ void update_router(const rout_msg_t * msg){
         router_metric = msg_metric;
 
     } else {
-  	double rng = ((double) random(100))/100;
+        double rng = ((double) random(100))/100;
         if(!has_router() || ((distance_to_sink(msg->from) < distance_to_sink(node_id)) && rng <= msg_metric)){
             local_hops = msg->hops+1;
             router_battery = msg->bat;
             router_metric = msg_metric;
             set_router(msg->from);
         }
-    }
+    } 
 
+  } else if(ROUTERTYPE == 1){
+    if(router_addr.u16[0] == msg->from){
+        // current router is same, we just update battery
+        router_battery = msg->bat;
+    } else {
+        if(local_hops==0 || msg->hops+1<local_hops || (msg->hops+1==local_hops && msg->bat>router_battery)){
+            local_hops = msg->hops+1;
+            router_battery = msg->bat;
+            //router_metric = msg_metric;
+            set_router(msg->from);
+        }
+}
+  } else if(ROUTERTYPE == 2){
+      int32_t msg_distance = distance_to_sink(msg->from);
+      if(msg_distance > router_distance && msg_distance < local_distance){
+          router_distance = msg_distance;
+          set_router(msg->from);
+      }
   }
 }
 
@@ -378,8 +401,13 @@ void start_node() {
   }
   if (is_sink()){
       local_hops=0;
+<<<<<<< HEAD
   } 
  
+=======
+  }
+  local_distance=distance_to_sink(node_id);
+>>>>>>> b34b6e7c8f535a3b8512e77c655aa21772feb5c3
   /* Initialize NullNet input callback */
   nullnet_set_input_callback(input_callback);
   /* Start the timer */
@@ -406,7 +434,7 @@ bool battery_check() {
       /* Do not change this message as it is used by Cooja to halt the simulation early */
       LOG_WARN_("Sink: Battery: DEAD\n");
     }
-    if(BASICROUTER){
+    if(ROUTERTYPE==0){
         LOG_INFO("BASIC ROUTER\n");
     }
     stop_node();
