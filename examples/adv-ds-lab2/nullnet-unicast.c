@@ -113,7 +113,8 @@ enum round_type_enum { ROUND_ANNOUNCEMENT = 0, ROUND_CONTENT };
 #define USEBATTERY 1
 
 /* Whether basic routing should be used */
-#define ROUTERTYPE 2
+#define ROUTERTYPE 1
+#define AGGREGATION 1
 // ROUTERTYPE 0 : BASIC, 1: MIN HOPS, 2: MAX HOPS
 // BASIC : around 1300 msgs (1321)
 // MIN HOPS : around 1400 msgs (1433)
@@ -138,8 +139,10 @@ static struct etimer periodic_timer; /* Wakeup timer */
 #define GET_MSG_TYPE_STR(T) ( (T) == TYPE_ANNOUNCEMENT ? "ANNOUNCEMENT" : ((T) == TYPE_CONTENT ? "CONTENT" : "UNKNOWN") )
 
 /* Returns a random number between 0 and n-1 (both inclusive) */
-uint16_t random(uint16_t n) {
-  return (random_rand()) % n;
+uint16_t randommmm(uint16_t n) {
+   uint16_t r = (uint16_t) random_rand();
+   LOG_INFO("RANDOM: %u, n: %u, RANDOM MODULO N: %u", r, n, r % n);
+   return (r % n);
 }
 
 /* Comuptes the square of the distance. We do not use the sqaure root function to have light-weight computations. */
@@ -186,6 +189,17 @@ bool has_router(){
    */
 }
 
+static bool aggregator = 0;
+static uint16_t agg_sum = 0;
+
+void set_aggregator(bool agg){
+   aggregator = agg;
+}
+
+bool is_aggregator(){
+   return aggregator;
+}
+
 void set_router(short_address_t new_router_id){
   router_addr.u16[0] = new_router_id;
   LOG_INFO("Router: updated to %u\n", new_router_id);
@@ -198,6 +212,47 @@ void sink_collect_data(const rout_msg_t * msg){
   LOG_INFO("Sink: collected so far %u\n", collected_so_far);
 }
 
+short_address_t neighbors[12];
+double metrics[12];
+uint16_t probs[12];
+
+void update_metric(short_address_t node, double metric){
+   uint8_t i;
+   for(i = 0; i < 12; i++){
+      if(neighbors[i] == node || neighbors[i] == 99){
+	neighbors[i] = node;
+ 	metrics[i] = metric;
+	break;
+      }
+   }
+
+   double sum = 0;
+   for(i = 0; i < 12 && neighbors[i] != 99; i++){
+	sum += metrics[i];
+   }
+
+   for(i = 0; i < 12 && neighbors[i] != 99; i++){
+	probs[i] = (uint16_t) (100 * (metrics[i]/sum));
+        LOG_INFO("SET PROB TO %u \n", probs[i]);
+   }
+}
+
+void select_router(){
+   short_address_t rout = neighbors[0];
+   uint16_t prob        = probs[0];
+   uint16_t rng         = randommmm(100);
+   uint8_t  i;
+   LOG_INFO("NODE SELECTION RNG: %u . RNG < 100: %u \n", rng, rng < 100);
+   for(i = 0; i < 12; i++){
+	if(rng <= probs[i] && prob < probs[i]){
+	   prob = probs[i];
+           rout = neighbors[i];
+        }
+   }
+   set_router(rout);
+}
+
+
 void update_router(const rout_msg_t * msg){
   /* Here is the basic routing algorithm. You shall design a better one below. */
  if(ROUTERTYPE == 0 || !has_router()) {
@@ -205,6 +260,7 @@ void update_router(const rout_msg_t * msg){
     bool good_candidate = distance_to_sink(msg->from) < distance_to_sink(node_id);
     if( !has_router() && good_candidate ){
       router_distance = distance_to_sink(msg->from);
+      router_battery  = msg->bat;
       set_router(msg->from);
     }
   } else if(ROUTERTYPE == 3) {
@@ -215,7 +271,7 @@ void update_router(const rout_msg_t * msg){
     * BASICROUTER, but it's not a requirement.
     */
 
-   double msg_metric = 1.0;
+    double msg_metric = 1.0;
     int8_t i;
     if(msg->hops > 0){
        double bt = ((double)msg->bat)/(BATTERYSTART*msg->hops);
@@ -227,40 +283,76 @@ void update_router(const rout_msg_t * msg){
        msg_metric = 1.0;
     }
 
-
+   // update_metric(msg->from, msg_metric);
     if(router_addr.u16[0] == msg->from){
         // current router is same, we just update battery
         router_battery = msg->bat;
         router_metric = msg_metric;
 
     } else {
-        double rng = ((double) random(100))/100;
-        if(!has_router() || ((distance_to_sink(msg->from) < distance_to_sink(node_id)) && rng <= msg_metric)){
+        double rng = ((double) randommmm(100))/100;
+        //if(!has_router() ||( (distance_to_sink(msg->from) < distance_to_sink(node_id)) && router_battery < msg->bat)){
+        if(((distance_to_sink(msg->from) < distance_to_sink(node_id)) && rng <= msg_metric)){
             local_hops = msg->hops+1;
             router_battery = msg->bat;
             router_metric = msg_metric;
             set_router(msg->from);
+	    LOG_INFO("HUG LIFE. msg->bat: %u, router_battery: %u, current_battery: %u", msg->bat, router_battery, current_battery);
         }
-    } 
+    }
+
 
   } else if(ROUTERTYPE == 1){
+    //LOG_INFO("LET BRIGITTE SAY FUCK");
     if(router_addr.u16[0] == msg->from){
         // current router is same, we just update battery
         router_battery = msg->bat;
     } else {
-        if(local_hops==0 || msg->hops+1<local_hops || (msg->hops+1==local_hops && msg->bat>router_battery)){
+	/*double r_bat = (double) router_battery;
+	double m_bat = (double) msg->bat;
+  
+        if(msg->hops > 0){
+          m_bat = m_bat/msg->hops;
+        }
+
+        if(local_hops - 1 > 0){
+	  r_bat = r_bat/(local_hops - 1);
+        }*/
+
+        if(/*distance_to_sink(msg->from) < distance_to_sink(node_id) &&*/ msg->hops+1 <= local_hops){ 
             local_hops = msg->hops+1;
             router_battery = msg->bat;
             //router_metric = msg_metric;
             set_router(msg->from);
+            LOG_INFO("HUG LIFE. msg->bat: %u, router_battery: %u, current_battery: %u", msg->bat, router_battery, current_battery);
         }
-}
+  }
   } else if(ROUTERTYPE == 2){
       int32_t msg_distance = distance_to_sink(msg->from);
-      if(msg_distance > router_distance && msg_distance < local_distance){
+      if((msg_distance < router_distance && msg_distance < local_distance) || 
+         ((msg_distance - 1 == router_distance || msg_distance - 2 == router_distance) &&
+          msg->bat > router_battery)){
           router_distance = msg_distance;
+          router_battery  = msg->bat;
           set_router(msg->from);
       }
+  }else if(ROUTERTYPE == 4){
+    double msg_metric = 1.0;
+    int8_t i;
+    if(msg->hops > 0){
+       double bt = ((double)msg->bat)/BATTERYSTART;
+       for(i=0;i<distance_to_sink(msg->from);i++){
+         msg_metric *= bt;
+       }
+      //msg_metric = msg_hops * msg->bat;
+    }else{
+       msg_metric = 1.0;
+    }
+
+    if(distance_to_sink(msg->from) < distance_to_sink(node_id)){
+      update_metric(msg->from, msg_metric);
+    }
+
   }
 }
 
@@ -294,11 +386,11 @@ bool route_message(const rout_msg_t * msg){
   if( msg->type == TYPE_ANNOUNCEMENT ){
     nexthop_addr = (linkaddr_t *)&linkaddr_null; /* broadcast address -- all zeros */
   } else if( msg->type == TYPE_CONTENT ){
-    if( !has_router() ){
+    //if( !has_router() ){
       if( can_reach_sink(node_id) ){ /* I can reach the sink directly */
         nexthop_addr = &sink_addr;
         LOG_INFO_("WARNING: No router is set. Trying to reach to sink directly\n");
-      }
+     // }
     } else {
       nexthop_addr = &router_addr;
     }
@@ -316,6 +408,17 @@ bool send_content(){
   message.type = TYPE_CONTENT;
   message.content = 1;
   message.seq = sequence++;
+
+  if(AGGREGATION && is_aggregator()){
+    message.content = agg_sum + 1;
+    agg_sum = 0;
+  }
+
+
+  if(ROUTERTYPE == 4 && !is_sink()){
+     select_router();
+  }
+
   return route_message(&message);
 }
 
@@ -324,8 +427,31 @@ bool send_announcement(){
   static uint32_t sequence = 0;
   message.from = node_id; /* The ID of the node */
   message.type = TYPE_ANNOUNCEMENT;
-  message.hops = local_hops;
-  message.bat = current_battery + router_battery;
+  if(ROUTERTYPE == 1){
+     static uint16_t rng;
+     rng  = randommmm(500);
+     LOG_INFO("RNG: %u", rng);
+     message.hops = local_hops * (uint16_t) (rng * (((double)current_battery)/BATTERYSTART));
+     //LOG_INFO("BATTERYSTART/current_battery: %f\n", ((double)current_battery)/BATTERYSTART);
+     LOG_INFO("RNG: %u RNG * battery%: %u\n", rng, (uint16_t) (rng * (((double)current_battery)/BATTERYSTART)));
+     LOG_INFO("RNG < 500: %u, RNG > 500: %u, RNG > 1000: %u", rng < 500, rng > 500, rng > 1000);
+  }else{
+     message.hops = local_hops;
+  }
+
+  if(AGGREGATION){
+    if(!is_aggregator()){
+        if(randommmm(100) < 100*(((double)current_battery)/BATTERYSTART)){
+          message.hops = 0;
+          set_aggregator(1);
+    	}
+    }else{
+       if(randommmm(100) > 100 *(((double)current_battery)/BATTERYSTART)){
+	  set_aggregator(0);
+       }
+    }
+  }
+  message.bat = current_battery;  
   message.content = 0; /* could be used for the routing metric */
   message.seq = sequence++;
   LOG_INFO("Hops : %u, battery : %u\n",local_hops,current_battery);
@@ -350,6 +476,8 @@ bool communication_round(){
 void receive_content(const rout_msg_t *incoming_message) {
   if( is_sink() ){
     sink_collect_data( incoming_message );
+  }else if(AGGREGATION && is_aggregator()){
+    agg_sum += incoming_message->content;
   } else{
     route_message( incoming_message );
   }
@@ -401,13 +529,14 @@ void start_node() {
   }
   if (is_sink()){
       local_hops=0;
-<<<<<<< HEAD
-  } 
- 
-=======
   }
   local_distance=distance_to_sink(node_id);
->>>>>>> b34b6e7c8f535a3b8512e77c655aa21772feb5c3
+
+  uint8_t i;
+  for(i = 0; i < 12; i++){
+     neighbors[i] = 99;
+  }
+
   /* Initialize NullNet input callback */
   nullnet_set_input_callback(input_callback);
   /* Start the timer */
