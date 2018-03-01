@@ -117,7 +117,7 @@ enum round_type_enum { ROUND_ANNOUNCEMENT = 0, ROUND_CONTENT };
 // ROUTERTYPE 0 : BASIC, 1: MIN HOPS, 2: MAX HOPS
 // BASIC : around 1300 msgs (1321)
 // MIN HOPS : around 1400 msgs (1433)
-// MAX HOPS : around 500 msgs (524)
+// MAX HOPS : around 1000 msgs (193)
 /*---------------------------------------------------------------------------*/
 /* default router address is the broadcast address: all zeros == linkaddr_null */
 static linkaddr_t router_addr = {{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }};
@@ -204,6 +204,7 @@ void update_router(const rout_msg_t * msg){
     /* I do not have a router ==> use the first neighbor that is closer to the sink as router */
     bool good_candidate = distance_to_sink(msg->from) < distance_to_sink(node_id);
     if( !has_router() && good_candidate ){
+      router_battery = msg->bat;
       router_distance = distance_to_sink(msg->from);
       set_router(msg->from);
     }
@@ -258,6 +259,12 @@ void update_router(const rout_msg_t * msg){
   } else if(ROUTERTYPE == 2){
       int32_t msg_distance = distance_to_sink(msg->from);
       if(msg_distance > router_distance && msg_distance < local_distance){
+          router_battery = msg->bat;
+          router_distance = msg_distance;
+          set_router(msg->from);
+      }
+      if(msg_distance < local_distance && msg->bat > router_battery){
+          router_battery = msg->bat;
           router_distance = msg_distance;
           set_router(msg->from);
       }
