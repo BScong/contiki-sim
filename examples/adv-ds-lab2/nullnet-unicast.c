@@ -73,6 +73,7 @@ typedef struct __attribute__((packed)) rout_msg {
   uint16_t hops;
   uint64_t bat;
   uint8_t type;         /* TYPE_ANNOUNCEMENT or TYPE_CONTENT*/
+  double batt;
 } rout_msg_t;
 
 /* Message type identifier */
@@ -113,8 +114,8 @@ enum round_type_enum { ROUND_ANNOUNCEMENT = 0, ROUND_CONTENT };
 #define USEBATTERY 1
 
 /* Whether basic routing should be used */
-#define ROUTERTYPE 1
-#define AGGREGATION 1
+#define ROUTERTYPE 5
+#define AGGREGATION 0
 // ROUTERTYPE 0 : BASIC, 1: MIN HOPS, 2: MAX HOPS
 // BASIC : around 1300 msgs (1321)
 // MIN HOPS : around 1400 msgs (1433)
@@ -238,6 +239,7 @@ void update_metric(short_address_t node, double metric){
 }
 
 void select_router(){
+   //LOG_INFO("SELECTION \n");
    short_address_t rout = neighbors[0];
    uint16_t prob        = probs[0];
    uint16_t rng         = randommmm(100);
@@ -247,6 +249,7 @@ void select_router(){
 	if(rng <= probs[i] && prob < probs[i]){
 	   prob = probs[i];
            rout = neighbors[i];
+           router_metric = metrics[i];
         }
    }
    set_router(rout);
@@ -308,6 +311,8 @@ void update_router(const rout_msg_t * msg){
     if(router_addr.u16[0] == msg->from){
         // current router is same, we just update battery
         router_battery = msg->bat;
+        local_hops = msg->hops+1;
+        router_metric = msg->batt;
     } else {
 	/*double r_bat = (double) router_battery;
 	double m_bat = (double) msg->bat;
@@ -320,7 +325,7 @@ void update_router(const rout_msg_t * msg){
 	  r_bat = r_bat/(local_hops - 1);
         }*/
 
-        if(/*distance_to_sink(msg->from) < distance_to_sink(node_id) &&*/ msg->hops+1 <= local_hops){ 
+        if(distance_to_sink(msg->from) < distance_to_sink(node_id) && msg->hops+1 <= local_hops){ 
             local_hops = msg->hops+1;
             router_battery = msg->bat;
             //router_metric = msg_metric;
@@ -330,7 +335,7 @@ void update_router(const rout_msg_t * msg){
   }
   } else if(ROUTERTYPE == 2){
       int32_t msg_distance = distance_to_sink(msg->from);
-      if(msg_distance > router_distance && msg_distance < local_distance){
+      if(msg_distance < router_distance && msg_distance < local_distance){
           router_battery = msg->bat;
           router_distance = msg_distance;
           set_router(msg->from);
@@ -342,13 +347,13 @@ void update_router(const rout_msg_t * msg){
       }
   }else if(ROUTERTYPE == 4){
     double msg_metric = 1.0;
-    int8_t i;
+  //  int8_t i;
     if(msg->hops > 0){
-       double bt = ((double)msg->bat)/BATTERYSTART;
-       for(i=0;i<distance_to_sink(msg->from);i++){
-         msg_metric *= bt;
-       }
-      //msg_metric = msg_hops * msg->bat;
+       //double bt = ((double)msg->bat)/BATTERYSTART;
+      // for(i=0;i<distance_to_sink(msg->from);i++){
+      //   msg_metric *= bt;
+      // }
+      msg_metric = msg->hops;//distance_to_sink(msg->from); //* (((double) msg->bat)/BATTERYSTART);
     }else{
        msg_metric = 1.0;
     }
@@ -356,6 +361,21 @@ void update_router(const rout_msg_t * msg){
     if(distance_to_sink(msg->from) < distance_to_sink(node_id)){
       update_metric(msg->from, msg_metric);
     }
+
+  }else if(ROUTERTYPE == 5){
+    if(router_addr.u16[0] == msg->from){
+        // current router is same, we just update battery
+        router_battery = msg->bat;
+    } else {
+        if((can_reach_sink(node_id) && msg->from==SINKNODE) ||
+           (!can_reach_sink(node_id) && 
+            distance_to_sink(msg->from) < distance_to_sink(node_id) && 
+            msg->bat < router_battery)){
+             router_battery = msg->bat;
+             set_router(msg->from);
+            
+        }
+  }
 
   }
 }
@@ -455,7 +475,22 @@ bool send_announcement(){
        }
     }
   }
-  message.bat = current_battery;  
+  if(ROUTERTYPE == 5){
+    
+    static uint16_t resid;
+    resid = (uint16_t) 100000 * (1.0/ (100.0 * ((double)current_battery/BATTERYSTART)));
+    LOG_INFO("BATTERY IS %u, METRIC IS %u, batteryper is %u\n", current_battery, resid,
+                           (uint16_t) (100.0 * ((double)current_battery/BATTERYSTART)));
+ 
+    if(resid > router_battery){
+       message.bat = resid;
+    }else{
+       message.bat = router_battery;
+    }
+    
+  }else{
+     message.bat = current_battery;  
+  }
   message.content = 0; /* could be used for the routing metric */
   message.seq = sequence++;
   LOG_INFO("Hops : %u, battery : %u\n",local_hops,current_battery);
