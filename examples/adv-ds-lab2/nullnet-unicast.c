@@ -114,7 +114,7 @@ enum round_type_enum { ROUND_ANNOUNCEMENT = 0, ROUND_CONTENT };
 #define USEBATTERY 1
 
 /* Whether basic routing should be used */
-#define ROUTERTYPE 5
+#define ROUTERTYPE 6
 #define AGGREGATION 0
 // ROUTERTYPE 0 : BASIC, 1: MIN HOPS, 2: MAX HOPS
 // BASIC : around 1300 msgs (1321)
@@ -256,6 +256,53 @@ void select_router(){
 }
 
 
+static uint16_t threshold = 50;
+static uint16_t cmmbcr_mets[12][2];
+void update_metrics_cmmbcr(short_address_t node, uint16_t batt, uint16_t hops){
+   uint8_t i;
+   for(i = 0; i < 12; i++){
+      if(neighbors[i] == node || neighbors[i] == 99){
+        neighbors[i] = node;
+        cmmbcr_mets[i][0] = batt;
+        cmmbcr_mets[i][1] = hops;
+        break;
+      }
+   }
+
+}
+
+
+void select_router_cmmbcr(){
+    if(can_reach_sink(node_id)){
+       set_router(SINKNODE);
+    }else{
+      uint8_t i;
+      static uint16_t b = 0;
+      uint8_t best_rout;
+      for(i = 0; i < 12 && neighbors[i] != 99; i++){
+	  if(cmmbcr_mets[i][0] > b){
+	     b = cmmbcr_mets[i][0];
+             best_rout = i;
+          }
+      }  
+
+      if(b > threshold){
+          b = 900;
+ 	  for(i = 0; i < 12 && neighbors[i] != 99; i++){
+             if(cmmbcr_mets[i][1] < b && cmmbcr_mets[i][0] > threshold){
+                 b = cmmbcr_mets[i][1];
+                 best_rout = i;
+             }
+          }
+      }
+      router_battery = cmmbcr_mets[best_rout][0];
+      local_hops = cmmbcr_mets[best_rout][1];	
+      set_router(neighbors[best_rout]);
+  }
+}
+
+
+
 void update_router(const rout_msg_t * msg){
   /* Here is the basic routing algorithm. You shall design a better one below. */
  if(ROUTERTYPE == 0 || !has_router()) {
@@ -265,6 +312,7 @@ void update_router(const rout_msg_t * msg){
       router_battery = msg->bat;
       router_distance = distance_to_sink(msg->from);
       router_battery  = msg->bat;
+      local_hops = msg->hops + 1;
       set_router(msg->from);
     }
   } else if(ROUTERTYPE == 3) {
@@ -377,6 +425,11 @@ void update_router(const rout_msg_t * msg){
         }
   }
 
+  }else if(ROUTERTYPE == 6){
+     LOG_INFO("UPDATE DAT METRIC");
+     if(distance_to_sink(msg->from) < distance_to_sink(node_id)){
+        update_metrics_cmmbcr(msg->from, msg->bat, msg->hops);
+     }
   }
 }
 
@@ -441,6 +494,8 @@ bool send_content(){
 
   if(ROUTERTYPE == 4 && !is_sink()){
      select_router();
+  }else if(ROUTERTYPE == 6 && !is_sink()){
+     select_router_cmmbcr();
   }
 
   return route_message(&message);
@@ -488,6 +543,17 @@ bool send_announcement(){
        message.bat = router_battery;
     }
     
+  }else if(ROUTERTYPE == 6){
+    static uint16_t resid;
+    resid = (uint16_t) (100.0 * ((double)current_battery/BATTERYSTART));
+    LOG_INFO("BATTERY IS %u, METRIC IS %u, batteryper is %u\n", current_battery, resid,
+                           (uint16_t) (100.0 * ((double)current_battery/BATTERYSTART)));
+    if(can_reach_sink(node_id) || resid < router_battery){
+       message.bat = resid;
+    }else{
+       message.bat = router_battery;
+    }
+
   }else{
      message.bat = current_battery;  
   }
