@@ -287,7 +287,7 @@ void select_router_cmmbcr(){
              LOG_INFO("(bat: %u, hops: %u)", cmmbcr_mets[i][0], cmmbcr_mets[i][1]);
           }
       }  
-      LOG_INFO("\n");
+      LOG_INFO("\n.");
       if(b > threshold){
           b = 900;
  	  for(i = 0; i < 12 && neighbors[i] != 99; i++){
@@ -298,7 +298,7 @@ void select_router_cmmbcr(){
           }
           router_battery = cmmbcr_mets[best_rout][0];
           local_hops     = cmmbcr_mets[best_rout][1] + 1;
-          LOG_INFO("SELECTED ROUTER W/ BATTERY %u, HOPS %u AND DISTANCE %u. OWN DISTANCE: %u", router_battery, local_hops, 
+          LOG_INFO("SELECTED ROUTER W/ BATTERY %u, HOPS %u AND DISTANCE %u. OWN DISTANCE: %u\n", router_battery, local_hops, 
                                                                                                distance_to_sink(neighbors[best_rout]),
                                                                                                distance_to_sink(node_id));
           set_router(neighbors[best_rout]);
@@ -438,7 +438,7 @@ void update_router(const rout_msg_t * msg){
   }
 
   }else if(ROUTERTYPE == 6){
-     LOG_INFO("UPDATE DAT METRIC");
+     //LOG_INFO("UPDATE DAT METRIC");
      if(distance_to_sink(msg->from) < distance_to_sink(node_id)){
         update_metrics_cmmbcr(msg->from, msg->bat, msg->hops);
      }
