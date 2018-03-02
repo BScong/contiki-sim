@@ -294,7 +294,7 @@ void select_router_cmmbcr(){
                  best_rout = i;
              }
           }
-          router_battery = cmmbc_mets[best_rout][0];
+          router_battery = cmmbcr_mets[best_rout][0];
           local_hops     = cmmbcr_mets[best_rout][1];
           set_router(neighbors[best_rout]);
       }else if(threshold > 20){
