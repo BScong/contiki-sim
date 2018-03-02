@@ -284,7 +284,7 @@ void select_router_cmmbcr(){
 	  if(cmmbcr_mets[i][0] > b){
 	     b = cmmbcr_mets[i][0];
              best_rout = i;
-             LOG_INFO("(bat: %u, hops: %u)", cmmbcr_mets[i][0], cmmbcr[i][1]);
+             LOG_INFO("(bat: %u, hops: %u)", cmmbcr_mets[i][0], cmmbcr_mets[i][1]);
           }
       }  
       LOG_INFO("\n");
