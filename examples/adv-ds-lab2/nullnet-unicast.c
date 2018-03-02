@@ -256,7 +256,7 @@ void select_router(){
 }
 
 
-static uint16_t threshold = 50;
+static uint16_t threshold = 75;
 static uint16_t cmmbcr_mets[12][2];
 void update_metrics_cmmbcr(short_address_t node, uint16_t batt, uint16_t hops){
    uint8_t i;
@@ -294,10 +294,17 @@ void select_router_cmmbcr(){
                  best_rout = i;
              }
           }
+          router_battery = cmmbc_mets[best_rout][0];
+          local_hops     = cmmbcr_mets[best_rout][1];
+          set_router(neighbors[best_rout]);
+      }else if(threshold > 20){
+         threshold = threshold - 10;
+         select_router_cmmbcr();
+      }else{
+         router_battery = cmmbcr_mets[best_rout][0];
+         local_hops = cmmbcr_mets[best_rout][1];	
+         set_router(neighbors[best_rout]);
       }
-      router_battery = cmmbcr_mets[best_rout][0];
-      local_hops = cmmbcr_mets[best_rout][1];	
-      set_router(neighbors[best_rout]);
   }
 }
 
