@@ -279,13 +279,15 @@ void select_router_cmmbcr(){
       uint8_t i;
       static uint16_t b = 0;
       uint8_t best_rout;
+      LOG_INFO("SELECT ROUTER");
       for(i = 0; i < 12 && neighbors[i] != 99; i++){
 	  if(cmmbcr_mets[i][0] > b){
 	     b = cmmbcr_mets[i][0];
              best_rout = i;
+             LOG_INFO("(bat: %u, hops: %u)", cmmbcr_mets[i][0], cmmbcr[i][1]);
           }
       }  
-
+      LOG_INFO("\n");
       if(b > threshold){
           b = 900;
  	  for(i = 0; i < 12 && neighbors[i] != 99; i++){
@@ -295,14 +297,17 @@ void select_router_cmmbcr(){
              }
           }
           router_battery = cmmbcr_mets[best_rout][0];
-          local_hops     = cmmbcr_mets[best_rout][1];
+          local_hops     = cmmbcr_mets[best_rout][1] + 1;
+          LOG_INFO("SELECTED ROUTER W/ BATTERY %u, HOPS %u AND DISTANCE %u. OWN DISTANCE: %u", router_battery, local_hops, 
+                                                                                               distance_to_sink(neighbors[best_rout]),
+                                                                                               distance_to_sink(node_id));
           set_router(neighbors[best_rout]);
       }else if(threshold > 20){
          threshold = threshold - 10;
          select_router_cmmbcr();
       }else{
          router_battery = cmmbcr_mets[best_rout][0];
-         local_hops = cmmbcr_mets[best_rout][1];	
+         local_hops = cmmbcr_mets[best_rout][1] + 1;	
          set_router(neighbors[best_rout]);
       }
   }
